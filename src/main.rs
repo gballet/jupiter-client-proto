@@ -6,15 +6,26 @@ use rusqlite::{Connection, Result};
 
 use clap::{App, Arg, SubCommand};
 
-fn initdb(dbfilename: &str) -> Result<()> {
+fn initdb(dbfilename: &str) -> Result<Connection> {
     let conn = Connection::open(dbfilename)?;
 
     conn.execute(
-        "create table if not exists leaves(id integer primary key, key blob, value blob)",
+        "create table if not exists leaves(id integer primary key, key blob, value blob);",
         NO_PARAMS,
     )?;
 
-    Ok(())
+    conn.execute("CREATE TABLE IF NOT EXISTS root(hash blob);", NO_PARAMS)?;
+
+    let rootcount: u32 = conn.query_row("select count(*) FROM root;", NO_PARAMS, |row| {
+        Ok(row.get(0)?)
+    })?;
+    if rootcount == 0 {
+        let empty_root =
+            hex::decode("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
+        conn.execute("INSERT INTO root (hash) values (?1)", empty_root)?;
+    }
+
+    Ok(conn)
 }
 
 fn main() -> Result<()> {
@@ -67,7 +78,7 @@ fn main() -> Result<()> {
     // Start with initializing the leaf DB
     let dbfilename = matches.value_of("db").unwrap_or("leaves.db");
 
-    initdb(dbfilename)?;
+    let db = initdb(dbfilename)?;
 
     match matches.subcommand() {
         ("new", Some(submatches)) => {}
