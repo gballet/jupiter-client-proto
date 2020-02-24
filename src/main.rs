@@ -1,8 +1,10 @@
 extern crate clap;
+extern crate multiproof_rs;
 extern crate rusqlite;
 
+use multiproof_rs::{NibbleKey, Node, Tree};
 use rusqlite::NO_PARAMS;
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, Result, Row};
 
 use clap::{App, Arg, SubCommand};
 
@@ -16,16 +18,48 @@ fn initdb(dbfilename: &str) -> Result<Connection> {
 
     conn.execute("CREATE TABLE IF NOT EXISTS root(hash blob);", NO_PARAMS)?;
 
-    let rootcount: u32 = conn.query_row("select count(*) FROM root;", NO_PARAMS, |row| {
-        Ok(row.get(0)?)
-    })?;
-    if rootcount == 0 {
-        let empty_root =
-            hex::decode("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
-        conn.execute("INSERT INTO root (hash) values (?1)", empty_root)?;
-    }
 
     Ok(conn)
+}
+
+fn get_root(db: &Connection) -> Vec<u8> {
+    let h: Vec<u8> = db
+        .query_row("select hash FROM root;", NO_PARAMS, |row| {
+            Ok(row.get::<_, Vec<u8>>(0)?)
+        })
+        .unwrap();
+    h
+}
+
+fn has_root(db: &Connection) -> bool {
+    let count: u32 = db
+        .query_row("select count(*) FROM root;", NO_PARAMS, |row| {
+            Ok(row.get(0)?)
+        })
+        .unwrap();
+    count > 0
+}
+
+fn extract_key(row: &Row) -> Result<(NibbleKey, Vec<u8>)> {
+    let bkey = row.get::<_, Vec<u8>>(0)?;
+    let k = NibbleKey::from(bkey);
+    let v: Vec<u8> = row.get(1)?;
+    Ok((k, v))
+}
+
+fn rebuild_trie(db: &Connection) -> Result<Node> {
+    let mut root = Node::EmptySlot;
+    if has_root(db) {
+        let mut stmt = db.prepare("SELECT key, value FROM leaves ORDER BY key;")?;
+        let keyvals = stmt.query_map(NO_PARAMS, extract_key)?;
+
+        for kvr in keyvals {
+            let (key, val) = kvr?;
+            root.insert(&key, val.to_vec()).unwrap();
+        }
+    }
+
+    Ok(root)
 }
 
 fn main() -> Result<()> {
@@ -47,11 +81,22 @@ fn main() -> Result<()> {
                         .short("t")
                         .help("tx's recipient address"),
                 )
-                .arg(Arg::with_name("value").short("v").help("tx's value"))
-                .arg(Arg::with_name("nonce").short("n").help("tx's nonce"))
+                .arg(
+                    Arg::with_name("value")
+                        .takes_value(true)
+                        .short("v")
+                        .help("tx's value"),
+                )
+                .arg(
+                    Arg::with_name("nonce")
+                        .takes_value(true)
+                        .short("n")
+                        .help("tx's nonce"),
+                )
                 .arg(
                     Arg::with_name("signature")
                         .short("s")
+                        .takes_value(true)
                         .help("tx's signature = sender's signature"),
                 ),
         )
