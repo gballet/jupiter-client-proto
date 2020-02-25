@@ -11,3 +11,5 @@ rusqlite = "^0.21.0"
 clap = "^2.33.0"
 hex = "^0.3.1"
 multiproof-rs = "^0.1.4"
+account = { path = "../tree-precompiles-eth1/account"}
+rlp = "0.4.4"

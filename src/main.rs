@@ -1,12 +1,44 @@
+extern crate account;
 extern crate clap;
 extern crate multiproof_rs;
+extern crate rlp;
 extern crate rusqlite;
 
-use multiproof_rs::{NibbleKey, Node, Tree};
-use rusqlite::NO_PARAMS;
-use rusqlite::{Connection, Result, Row};
-
+use account::Account;
 use clap::{App, Arg, SubCommand};
+use multiproof_rs::{make_multiproof, ByteKey, Multiproof, NibbleKey, Node, Tree};
+use rusqlite::{Connection, Result, Row, NO_PARAMS};
+
+/// Represents a layer-2 transaction.
+#[derive(Debug)]
+struct Tx {
+    from: NibbleKey,
+    to: NibbleKey,
+    nonce: u64,
+    value: u64,
+    call: u32, // Txs have only one instruction in this model, and it's a "call"
+}
+
+impl rlp::Encodable for Tx {
+    fn rlp_append(&self, stream: &mut rlp::RlpStream) {
+        stream
+            .begin_unbounded_list()
+            .append(&self.from)
+            .append(&self.to)
+            .append(&self.nonce)
+            .append(&self.value)
+            .append(&self.call)
+            .finalize_unbounded_list();
+    }
+}
+
+/// Represents the data that should be encoded inside a layer one `data` field.
+#[derive(Debug)]
+struct TxData {
+    proof: Multiproof,
+    txs: Vec<Vec<u8>>,
+    signature: Vec<u8>,
+}
 
 fn initdb(dbfilename: &str) -> Result<Connection> {
     let conn = Connection::open(dbfilename)?;
@@ -69,8 +101,26 @@ fn main() -> Result<()> {
         .about(env!("CARGO_PKG_DESCRIPTION"))
         .arg(Arg::with_name("db").help("path to the database file"))
         .subcommand(
-            SubCommand::with_name("new")
-                .about("craft a new, unsigned tx")
+            SubCommand::with_name("join")
+                .about("creates an unsigned tx to send value")
+                .arg(
+                    Arg::with_name("addr")
+                        .short("a")
+                        .takes_value(true)
+                        .required(true)
+                        .help("the account to create"),
+                )
+                .arg(
+                    Arg::with_name("value")
+                        .takes_value(true)
+                        .short("v")
+                        .required(true)
+                        .help("tx's value"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("sendtx")
+                .about("creates an unsigned tx to send value")
                 .arg(
                     Arg::with_name("from")
                         .short("f")
@@ -126,7 +176,50 @@ fn main() -> Result<()> {
     let db = initdb(dbfilename)?;
 
     match matches.subcommand() {
-        ("new", Some(submatches)) => {}
+        ("join", Some(submatches)) => {
+            let mut trie = rebuild_trie(&db).unwrap();
+            let tx_value = submatches
+                .value_of("value")
+                .unwrap()
+                .parse::<u64>()
+                .unwrap();
+
+            // TODO DRY
+            let sender_addr = NibbleKey::from(ByteKey::from(
+                hex::decode(submatches.value_of("addr").unwrap()).unwrap(),
+            ));
+            if trie.has_key(&sender_addr) {
+                panic!(format!(
+                    "Can not create address {:?} as it already exists",
+                    sender_addr
+                ));
+            }
+
+            let account = Account::Existing(sender_addr.clone(), tx_value as u32, vec![], true);
+            trie.insert(&sender_addr, rlp::encode(&account)).unwrap();
+
+            let layer2tx = Tx {
+                value: tx_value,
+                from: NibbleKey::from(
+                    hex::decode("0000000000000000000000000000000000000000000000000000000000")
+                        .unwrap(),
+                ),
+                to: sender_addr.clone(),
+                call: 0,
+                nonce: 0,
+            };
+            let proof = make_multiproof(&trie, vec![sender_addr]).unwrap();
+
+            println!("New root: {:?}", trie.hash());
+            println!(
+                "Transaction data: {:?}",
+                TxData {
+                    proof,
+                    txs: vec![rlp::encode(&layer2tx)],
+                    signature: vec![]
+                }
+            );
+        }
         _ => panic!("Not implemented yet"),
     }
 
