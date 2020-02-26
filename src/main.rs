@@ -6,8 +6,8 @@ extern crate rusqlite;
 
 use account::Account;
 use clap::{App, Arg, SubCommand};
-use multiproof_rs::{make_multiproof, ByteKey, Multiproof, NibbleKey, Node, Tree};
-use rusqlite::{Connection, Result, Row, NO_PARAMS};
+use multiproof_rs::{make_multiproof, ByteKey, Multiproof, NibbleKey, Node, ProofToTree, Tree};
+use rusqlite::{Connection, Row, NO_PARAMS};
 
 /// Represents a layer-2 transaction.
 #[derive(Debug)]
@@ -32,15 +32,48 @@ impl rlp::Encodable for Tx {
     }
 }
 
+impl rlp::Decodable for Tx {
+    fn decode(rlp: &rlp::Rlp) -> Result<Self, rlp::DecoderError> {
+        Ok(Tx {
+            from: NibbleKey::from(rlp.val_at::<Vec<u8>>(0)?),
+            to: NibbleKey::from(rlp.val_at::<Vec<u8>>(1)?),
+            nonce: rlp.val_at(2)?,
+            value: rlp.val_at(3)?,
+            call: rlp.val_at(4)?,
+        })
+    }
+}
+
 /// Represents the data that should be encoded inside a layer one `data` field.
 #[derive(Debug)]
 struct TxData {
     proof: Multiproof,
-    txs: Vec<Vec<u8>>,
+    txs: Vec<Tx>,
     signature: Vec<u8>,
 }
 
-fn initdb(dbfilename: &str) -> Result<Connection> {
+impl rlp::Encodable for TxData {
+    fn rlp_append(&self, stream: &mut rlp::RlpStream) {
+        stream
+            .begin_unbounded_list()
+            .append(&self.proof)
+            .append_list(&self.txs)
+            .append(&self.signature)
+            .finalize_unbounded_list();
+    }
+}
+
+impl rlp::Decodable for TxData {
+    fn decode(rlp: &rlp::Rlp) -> Result<Self, rlp::DecoderError> {
+        Ok(TxData {
+            proof: rlp.val_at::<Multiproof>(0)?,
+            txs: rlp.list_at(1)?,
+            signature: rlp.val_at::<Vec<u8>>(2)?,
+        })
+    }
+}
+
+fn initdb(dbfilename: &str) -> rusqlite::Result<Connection> {
     let conn = Connection::open(dbfilename)?;
 
     conn.execute(
@@ -72,14 +105,14 @@ fn has_root(db: &Connection) -> bool {
     count > 0
 }
 
-fn extract_key(row: &Row) -> Result<(NibbleKey, Vec<u8>)> {
+fn extract_key(row: &Row) -> rusqlite::Result<(NibbleKey, Vec<u8>)> {
     let bkey = row.get::<_, Vec<u8>>(0)?;
     let k = NibbleKey::from(bkey);
     let v: Vec<u8> = row.get(1)?;
     Ok((k, v))
 }
 
-fn rebuild_trie(db: &Connection) -> Result<Node> {
+fn rebuild_trie(db: &Connection) -> rusqlite::Result<Node> {
     let mut root = Node::EmptySlot;
     if has_root(db) {
         let mut stmt = db.prepare("SELECT key, value FROM leaves ORDER BY key;")?;
@@ -94,7 +127,7 @@ fn rebuild_trie(db: &Connection) -> Result<Node> {
     Ok(root)
 }
 
-fn main() -> Result<()> {
+fn main() -> rusqlite::Result<()> {
     let matches = App::new("jupiter-client")
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
@@ -209,15 +242,33 @@ fn main() -> Result<()> {
                 nonce: 0,
             };
             let proof = make_multiproof(&trie, vec![sender_addr]).unwrap();
+            let txdata = TxData {
+                proof,
+                txs: vec![layer2tx],
+                signature: vec![],
+            };
 
             println!("New root: {:?}", trie.hash());
+            println!("Transaction data: {:?}", txdata);
+            println!("Encoded data: {:?}", rlp::encode(&txdata));
+        }
+            let final_hash = trie.hash();
+
+            let layer2tx = Tx {
+                value: tx_value,
+                from: sender.0,
+                to: receiver.0,
+                call: 0,
+                nonce: 0, // XXX saccount.nonce
+            };
             println!(
-                "Transaction data: {:?}",
+                "Proof: {:?}\nHash: {:?}",
                 TxData {
                     proof,
-                    txs: vec![rlp::encode(&layer2tx)],
+                    txs: vec![layer2tx],
                     signature: vec![]
-                }
+                },
+                final_hash
             );
         }
         _ => panic!("Not implemented yet"),
