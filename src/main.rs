@@ -96,6 +96,11 @@ fn get_root(db: &Connection) -> Vec<u8> {
     h
 }
 
+fn update_root(db: &Connection, hash: Vec<u8>) -> rusqlite::Result<()> {
+    db.execute("UPDATE root SET hash = ?1", hash)?;
+    Ok(())
+}
+
 fn has_root(db: &Connection) -> bool {
     let count: u32 = db
         .query_row("select count(*) FROM root;", NO_PARAMS, |row| {
