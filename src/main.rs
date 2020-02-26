@@ -352,6 +352,64 @@ fn main() -> rusqlite::Result<()> {
                 final_hash
             );
         }
+        ("apply", Some(submatches)) => {
+            let txdata: TxData =
+                rlp::decode(&hex::decode(submatches.value_of("data").unwrap()).unwrap()).unwrap();
+            let mut trie: Node = txdata.proof.rebuild().unwrap();
+            let root = get_root(&db);
+            if root != trie.hash() {
+                panic!("Invalid root hash {:?}", trie.hash());
+            }
+
+            for tx in txdata.txs {
+                if tx.from != sender {
+                    panic!(format!(
+                        "Invalid transaction: from={:?} != to={:?}",
+                        tx.from, sender
+                    ));
+                }
+
+                if !trie.has_key(&tx.from) {
+                    panic!(format!("Account isn't present in trie: {:?}", tx.from));
+                }
+
+                let sleaf = match trie[&tx.from] {
+                    Node::Leaf(k, v) => v,
+                    _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.from)),
+                };
+                let sacc = match rlp::decode::<Account>(&sleaf).unwrap() {
+                    sa @ Account::Existing(_, _, ref mut val, _, _) => {
+                        *val -= tx.value;
+                        sa
+                    }
+                    _ => panic!("Sender account is an empty account!"),
+                };
+
+                let racc = if !trie.has_key(&tx.to) {
+                    match trie[&tx.to] {
+                        Node::Leaf(k, v) => rlp::decode(&v).unwrap(),
+                        _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.to)),
+                    }
+                } else {
+                    Account::Existing(tx.to, 0, tx.value, vec![], false)
+                };
+
+                db.execute(
+                    "UPDATE hash WHERE key = ?1 SET value = ?2;",
+                    vec![(tx.to, rlp::encode(&racc))],
+                );
+
+                db.execute(
+                    "UPDATE hash WHERE key = ?1 SET value = ?2;",
+                    vec![(tx.from, rlp::encode(&sacc))],
+                );
+
+                trie.insert(&tx.from, rlp::encode(&sacc)).unwrap();
+                trie.insert(&tx.to, rlp::encode(&racc)).unwrap();
+            }
+
+            update_root(&db, trie.hash());
+        }
         _ => panic!("Not implemented yet"),
     }
 
