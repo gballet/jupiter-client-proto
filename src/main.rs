@@ -233,7 +233,7 @@ fn main() -> rusqlite::Result<()> {
                 ));
             }
 
-            let account = Account::Existing(sender_addr.clone(), tx_value as u32, vec![], true);
+            let account = Account::Existing(sender_addr.clone(), 0, tx_value, vec![], true);
             trie.insert(&sender_addr, rlp::encode(&account)).unwrap();
 
             let layer2tx = Tx {
