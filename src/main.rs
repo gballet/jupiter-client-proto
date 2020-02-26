@@ -162,24 +162,23 @@ fn main() -> rusqlite::Result<()> {
                 .arg(
                     Arg::with_name("from")
                         .short("f")
+                        .takes_value(true)
+                        .required(true)
                         .help("tx's sender address"),
                 )
                 .arg(
                     Arg::with_name("to")
                         .short("t")
+                        .takes_value(true)
+                        .required(true)
                         .help("tx's recipient address"),
                 )
                 .arg(
                     Arg::with_name("value")
                         .takes_value(true)
                         .short("v")
+                        .required(true)
                         .help("tx's value"),
-                )
-                .arg(
-                    Arg::with_name("nonce")
-                        .takes_value(true)
-                        .short("n")
-                        .help("tx's nonce"),
                 )
                 .arg(
                     Arg::with_name("signature")
@@ -257,6 +256,83 @@ fn main() -> rusqlite::Result<()> {
             println!("Transaction data: {:?}", txdata);
             println!("Encoded data: {:?}", rlp::encode(&txdata));
         }
+        ("sendtx", Some(submatches)) => {
+            // Extract tx information
+            let tx_value = submatches
+                .value_of("value")
+                .unwrap_or("0")
+                .parse::<u64>()
+                .unwrap();
+
+            let mut trie = rebuild_trie(&db).unwrap();
+
+            // Extract sender information
+            let sender_addr: &str = submatches.value_of("from").unwrap();
+            let sender: (NibbleKey, Vec<u8>) = db.query_row(
+                "SELECT key, value FROM leaves WHERE key = ?1;",
+                hex::decode(sender_addr),
+                extract_key,
+            )?;
+            if !trie.has_key(&sender.0) {
+                panic!(format!("Could not find sender address {:?}", sender));
+            }
+            let mut saccount: Account = rlp::decode(&sender.1).unwrap();
+
+            // Serialize the updated sender account
+            let next_saccount = match saccount {
+                Account::Existing(_, _, ref mut balance, _, _) => {
+                    // Check that the sender's value is lower than the sending account's
+                    // balance.
+                    if (*balance as u64) < tx_value {
+                        panic!(format!("Account {:?} only has a balance of {}, which is lower than the requested {}", sender.0, balance, tx_value))
+                    }
+
+
+                    *balance -= tx_value;
+                    rlp::encode(&saccount)
+                }
+                Account::Empty => panic!(format!(
+                    "Attempting to send a transaction from empty account {:?}",
+                    sender.0
+                )),
+            };
+
+            // Extract recipient information
+            let receiver_addr: &str = submatches.value_of("to").unwrap();
+            let receiver: (NibbleKey, Vec<u8>) = db.query_row(
+                "SELECT key, value FROM leaves WHERE key = ?1;",
+                hex::decode(receiver_addr),
+                extract_key,
+            )?;
+            if !trie.has_key(&receiver.0) {
+                panic!(format!("Could not find receiver address {:?}", receiver));
+            }
+            let mut raccount: Account = rlp::decode(&receiver.1).unwrap();
+
+            // Serialize the updated recipient account
+            let next_raccount = match raccount {
+                Account::Existing(_, _, ref mut balance, _, _) => {
+
+                    *balance += tx_value;
+                    rlp::encode(&saccount)
+                }
+                Account::Empty => {
+                    // Sending to a non-existing account, create it
+                    rlp::encode(&Account::Existing(
+                        receiver.0.clone(),
+                        0,
+                        tx_value,
+                        vec![],
+                        true,
+                    ))
+                }
+            };
+
+            // Update the trie, generate the proof and calculate the root and add
+            // it to the database.
+            trie.insert(&sender.0, next_saccount).unwrap();
+            trie.insert(&receiver.0, next_raccount).unwrap();
+            let proof = make_multiproof(&trie, vec![sender.0.clone(), receiver.0.clone()]).unwrap();
             let final_hash = trie.hash();
 
             let layer2tx = Tx {
