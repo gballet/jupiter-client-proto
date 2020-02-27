@@ -246,6 +246,9 @@ fn main() -> rusqlite::Result<()> {
                 ));
             }
 
+            // Proof that the account isn't already in the trie.
+            let proof = make_multiproof(&trie, vec![sender_addr.clone()]).unwrap();
+
             let account = Account::Existing(sender_addr.clone(), 0, tx_value, vec![], true);
             trie.insert(&sender_addr, rlp::encode(&account)).unwrap();
 
@@ -259,7 +262,6 @@ fn main() -> rusqlite::Result<()> {
                 call: 0,
                 nonce: 0,
             };
-            let proof = make_multiproof(&trie, vec![sender_addr]).unwrap();
             let txdata = TxData {
                 proof,
                 txs: vec![layer2tx],
@@ -268,7 +270,7 @@ fn main() -> rusqlite::Result<()> {
 
             println!("New root: {:?}", trie.hash());
             println!("Transaction data: {:?}", txdata);
-            println!("Encoded data: {:?}", rlp::encode(&txdata));
+            println!("Encoded data: {}", hex::encode(rlp::encode(&txdata)));
         }
         ("sendtx", Some(submatches)) => {
             // Extract tx information
