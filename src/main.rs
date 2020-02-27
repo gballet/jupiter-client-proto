@@ -83,6 +83,20 @@ fn initdb(dbfilename: &str) -> rusqlite::Result<Connection> {
 
     conn.execute("CREATE TABLE IF NOT EXISTS root(hash blob);", NO_PARAMS)?;
 
+    let rootcount: u32 = conn.query_row("select count(*) FROM root;", NO_PARAMS, |row| {
+        Ok(row.get(0)?)
+    })?;
+    if rootcount == 0 {
+        let empty_root = Node::EmptySlot;
+        conn.execute(
+            format!(
+                "INSERT INTO root (hash) values (X'{}')",
+                hex::encode(empty_root.hash())
+            )
+            .as_str(),
+            NO_PARAMS,
+        )?;
+    }
 
     Ok(conn)
 }
