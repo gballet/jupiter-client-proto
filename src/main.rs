@@ -111,7 +111,10 @@ fn get_root(db: &Connection) -> Vec<u8> {
 }
 
 fn update_root(db: &Connection, hash: Vec<u8>) -> rusqlite::Result<()> {
-    db.execute("UPDATE root SET hash = ?1", hash)?;
+    db.execute(
+        format!("UPDATE root SET hash = X'{}'", hex::encode(hash)).as_str(),
+        NO_PARAMS,
+    )?;
     Ok(())
 }
 
@@ -216,7 +219,15 @@ fn main() -> rusqlite::Result<()> {
                 .arg(
                     Arg::with_name("data")
                         .short("d")
+                        .takes_value(true)
+                        .required(true)
                         .help("signed transaction data"),
+                )
+                .arg(
+                    Arg::with_name("sender")
+                        .short("s")
+                        .takes_value(true)
+                        .help("address of the sender"),
                 ),
         )
         .get_matches();
@@ -254,10 +265,10 @@ fn main() -> rusqlite::Result<()> {
 
             let layer2tx = Tx {
                 value: tx_value,
-                from: NibbleKey::from(
-                    hex::decode("0000000000000000000000000000000000000000000000000000000000")
+                from: NibbleKey::from(ByteKey::from(
+                    hex::decode("0000000000000000000000000000000000000000000000000000000000000000")
                         .unwrap(),
-                ),
+                )),
                 to: sender_addr.clone(),
                 call: 0,
                 nonce: 0,
@@ -377,54 +388,103 @@ fn main() -> rusqlite::Result<()> {
                 panic!("Invalid root hash {:?}", trie.hash());
             }
 
+            // Ideally, this code should recover the sender's address
+            // from the tx's signature. This will not be handled at this
+            // time so the command line value is currently trusted.
+            let sender = NibbleKey::from(ByteKey::from(
+                hex::decode(submatches.value_of("sender").unwrap()).unwrap(),
+            ));
+
             for tx in txdata.txs {
-                if tx.from != sender {
-                    panic!(format!(
-                        "Invalid transaction: from={:?} != to={:?}",
-                        tx.from, sender
-                    ));
-                }
+                let is_create = NibbleKey::from(ByteKey::from(
+                    hex::decode("0000000000000000000000000000000000000000000000000000000000000000")
+                        .unwrap(),
+                )) == tx.from;
 
-                if !trie.has_key(&tx.from) {
-                    panic!(format!("Account isn't present in trie: {:?}", tx.from));
-                }
-
-                let sleaf = match trie[&tx.from] {
-                    Node::Leaf(k, v) => v,
-                    _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.from)),
-                };
-                let sacc = match rlp::decode::<Account>(&sleaf).unwrap() {
-                    sa @ Account::Existing(_, _, ref mut val, _, _) => {
-                        *val -= tx.value;
-                        sa
+                // Note that anyone can create an account for someone else
+                let sacc = if is_create {
+                    if trie.has_key(&tx.from) {
+                        panic!(format!(
+                            "Trying to create an account that is already present at address {:?}",
+                            tx.from
+                        ));
                     }
-                    _ => panic!("Sender account is an empty account!"),
+
+                    Account::Existing(tx.from.clone(), 0, tx.value, vec![], false)
+                } else {
+                    if tx.from != sender {
+                        panic!(format!(
+                            "Invalid transaction: from={:?} != sender={:?}",
+                            tx.from, sender
+                        ));
+                    }
+
+                    if !trie.has_key(&tx.from) {
+                        panic!(format!("Account isn't present in trie: {:?}", tx.from));
+                    }
+
+                    let sleaf = match &trie[&tx.from] {
+                        Node::Leaf(_, v) => v,
+                        _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.from)),
+                    };
+                    let sacc = match rlp::decode::<Account>(&sleaf).unwrap() {
+                        Account::Existing(addr, n, val, code, state) => {
+                            Account::Existing(addr, n, val - tx.value, code, state)
+                        }
+                        _ => panic!("Sender account is an empty account!"),
+                    };
+
+                    trie.insert(&tx.from, rlp::encode(&sacc)).unwrap();
+
+                    sacc
                 };
 
-                let racc = if !trie.has_key(&tx.to) {
-                    match trie[&tx.to] {
-                        Node::Leaf(k, v) => rlp::decode(&v).unwrap(),
+                let racc = if trie.has_key(&tx.to) {
+                    match &trie[&tx.to] {
+                        Node::Leaf(_, v) => rlp::decode(&v).unwrap(),
                         _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.to)),
                     }
                 } else {
-                    Account::Existing(tx.to, 0, tx.value, vec![], false)
+                    Account::Existing(tx.to.clone(), 0, tx.value, vec![], false)
                 };
-
-                db.execute(
-                    "UPDATE hash WHERE key = ?1 SET value = ?2;",
-                    vec![(tx.to, rlp::encode(&racc))],
-                );
-
-                db.execute(
-                    "UPDATE hash WHERE key = ?1 SET value = ?2;",
-                    vec![(tx.from, rlp::encode(&sacc))],
-                );
-
-                trie.insert(&tx.from, rlp::encode(&sacc)).unwrap();
                 trie.insert(&tx.to, rlp::encode(&racc)).unwrap();
-            }
 
-            update_root(&db, trie.hash());
+                if !is_create {
+                    db.execute(
+                        format!(
+                            "UPDATE leaves SET value = X'{}' WHERE key = X'{}';",
+                            hex::encode(rlp::encode(&racc)),
+                            hex::encode(rlp::encode(&tx.to)),
+                        )
+                        .as_str(),
+                        NO_PARAMS,
+                    )?;
+
+                    db.execute(
+                        format!(
+                            "UPDATE leaves SET value = X'{}' WHERE key = X'{}';",
+                            hex::encode(rlp::encode(&sacc)),
+                            hex::encode(rlp::encode(&tx.from)),
+                        )
+                        .as_str(),
+                        NO_PARAMS,
+                    )?;
+                } else {
+                    db.execute(
+                        format!(
+                            "INSERT INTO leaves (key, value) VALUES (X'{}', X'{}');",
+                            hex::encode(rlp::encode(&tx.to)),
+                            hex::encode(rlp::encode(&racc)),
+                        )
+                        .as_str(),
+                        NO_PARAMS,
+                    )?;
+                }
+
+                // Update the root at each successful tx, because it might
+                // then fail. TODO make all these updates as a (db) transaction
+                update_root(&db, trie.hash())?;
+            }
         }
         _ => panic!("Not implemented yet"),
     }
