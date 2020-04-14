@@ -227,6 +227,7 @@ fn main() -> rusqlite::Result<()> {
                     Arg::with_name("sender")
                         .short("s")
                         .takes_value(true)
+                        .required(true)
                         .help("address of the sender"),
                 ),
         )
@@ -247,9 +248,8 @@ fn main() -> rusqlite::Result<()> {
                 .unwrap();
 
             // TODO DRY
-            let sender_addr = NibbleKey::from(ByteKey::from(
-                hex::decode(submatches.value_of("addr").unwrap()).unwrap(),
-            ));
+            let a = hex::decode(submatches.value_of("addr").unwrap()).unwrap();
+            let sender_addr = NibbleKey::from(ByteKey::from(a));
             if trie.has_key(&sender_addr) {
                 panic!(format!(
                     "Can not create address {:?} as it already exists",
