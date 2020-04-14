@@ -98,6 +98,11 @@ fn initdb(dbfilename: &str) -> rusqlite::Result<Connection> {
         )?;
     }
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS logs(id integer primary key, type string, sender blob, recipient blob, data blob);",
+        NO_PARAMS,
+    )?;
+
     Ok(conn)
 }
 
@@ -282,6 +287,18 @@ fn main() -> rusqlite::Result<()> {
             println!("New root: {:?}", trie.hash());
             println!("Transaction data: {:?}", txdata);
             println!("Encoded data: {}", hex::encode(rlp::encode(&txdata)));
+
+            db.execute(
+                format!(
+                    "INSERT INTO logs (type, sender, recipient, data) VALUES ('{}', '{}', '{}', X'{}');",
+                    "join",
+                    "0000000000000000000000000000000000000000000000000000000000000000",
+                    submatches.value_of("addr").unwrap(),
+                    hex::encode(rlp::encode(&txdata))
+                )
+                .as_str(),
+                NO_PARAMS,
+            )?;
         }
         ("sendtx", Some(submatches)) => {
             // Extract tx information
@@ -369,15 +386,24 @@ fn main() -> rusqlite::Result<()> {
                 call: 0,
                 nonce: 0, // XXX saccount.nonce
             };
-            println!(
-                "Proof: {:?}\nHash: {:?}",
-                TxData {
-                    proof,
-                    txs: vec![layer2tx],
-                    signature: vec![]
-                },
-                final_hash
-            );
+            let txdata = TxData {
+                proof,
+                txs: vec![layer2tx],
+                signature: vec![],
+            };
+            println!("Proof: {:?}\nHash: {:?}", txdata, final_hash);
+
+            db.execute(
+                format!(
+                    "INSERT INTO logs (type, sender, recipient, data) VALUES ('{}', '{}', '{}', X'{}');",
+                    "sendtx",
+                    submatches.value_of("from").unwrap(),
+                    submatches.value_of("to").unwrap(),
+                    hex::encode(rlp::encode(&txdata))
+                )
+                .as_str(),
+                NO_PARAMS,
+            )?;
         }
         ("apply", Some(submatches)) => {
             let txdata: TxData =
@@ -484,6 +510,18 @@ fn main() -> rusqlite::Result<()> {
                 // Update the root at each successful tx, because it might
                 // then fail. TODO make all these updates as a (db) transaction
                 update_root(&db, trie.hash())?;
+
+                db.execute(
+                format!(
+                    "INSERT INTO logs (type, sender, recipient, data) VALUES ('{}', '{}', '{}', X'{}');",
+                    "apply",
+                    hex::encode(rlp::encode(&tx.from)),
+                    hex::encode(rlp::encode(&tx.to)),
+                    hex::encode(rlp::encode(&tx))
+                )
+                .as_str(),
+                NO_PARAMS,
+            )?;
             }
         }
         _ => panic!("Not implemented yet"),
