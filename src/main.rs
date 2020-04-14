@@ -129,7 +129,7 @@ fn has_root(db: &Connection) -> bool {
 
 fn extract_key(row: &Row) -> rusqlite::Result<(NibbleKey, Vec<u8>)> {
     let bkey = row.get::<_, Vec<u8>>(0)?;
-    let k = NibbleKey::from(bkey);
+    let k: NibbleKey = NibbleKey::from(rlp::decode::<Vec<u8>>(&bkey).unwrap());
     let v: Vec<u8> = row.get(1)?;
     Ok((k, v))
 }
