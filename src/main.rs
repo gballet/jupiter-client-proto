@@ -411,7 +411,7 @@ fn main() -> rusqlite::Result<()> {
             let mut trie: Node = txdata.proof.rebuild().unwrap();
             let root = get_root(&db);
             if root != trie.hash() {
-                panic!("Invalid root hash {:?}", trie.hash());
+                panic!("Invalid root hash {:?} != {:?}", trie.hash(), root);
             }
 
             // Ideally, this code should recover the sender's address
