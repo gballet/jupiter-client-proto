@@ -134,7 +134,7 @@ fn has_root(db: &Connection) -> bool {
 
 fn extract_key(row: &Row) -> rusqlite::Result<(NibbleKey, Vec<u8>)> {
     let bkey = row.get::<_, Vec<u8>>(0)?;
-    let k: NibbleKey = NibbleKey::from(rlp::decode::<Vec<u8>>(&bkey).unwrap());
+    let k: NibbleKey = NibbleKey::from(ByteKey::from(bkey));
     let v: Vec<u8> = row.get(1)?;
     Ok((k, v))
 }
@@ -480,7 +480,7 @@ fn main() -> rusqlite::Result<()> {
                         format!(
                             "UPDATE leaves SET value = X'{}' WHERE key = X'{}';",
                             hex::encode(rlp::encode(&racc)),
-                            hex::encode(rlp::encode(&tx.to)),
+                            hex::encode::<Vec<u8>>(ByteKey::from(tx.to.clone()).into()),
                         )
                         .as_str(),
                         NO_PARAMS,
@@ -490,7 +490,7 @@ fn main() -> rusqlite::Result<()> {
                         format!(
                             "UPDATE leaves SET value = X'{}' WHERE key = X'{}';",
                             hex::encode(rlp::encode(&sacc)),
-                            hex::encode(rlp::encode(&tx.from)),
+                            hex::encode::<Vec<u8>>(ByteKey::from(tx.from.clone()).into()),
                         )
                         .as_str(),
                         NO_PARAMS,
@@ -499,7 +499,7 @@ fn main() -> rusqlite::Result<()> {
                     db.execute(
                         format!(
                             "INSERT INTO leaves (key, value) VALUES (X'{}', X'{}');",
-                            hex::encode(rlp::encode(&tx.to)),
+                            hex::encode::<Vec<u8>>(ByteKey::from(tx.to.clone()).into()),
                             hex::encode(rlp::encode(&racc)),
                         )
                         .as_str(),
@@ -515,8 +515,8 @@ fn main() -> rusqlite::Result<()> {
                 format!(
                     "INSERT INTO logs (type, sender, recipient, data) VALUES ('{}', '{}', '{}', X'{}');",
                     "apply",
-                    hex::encode(rlp::encode(&tx.from)),
-                    hex::encode(rlp::encode(&tx.to)),
+                    hex::encode::<Vec<u8>>(ByteKey::from(tx.from.clone()).into()),
+                    hex::encode::<Vec<u8>>(ByteKey::from(tx.to.clone()).into()),
                     hex::encode(rlp::encode(&tx))
                 )
                 .as_str(),
