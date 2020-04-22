@@ -322,8 +322,22 @@ fn main() -> rusqlite::Result<()> {
             }
             let mut saccount: Account = rlp::decode(&sender.1).unwrap();
 
+            // Extract recipient information
+            let receiver_addr: &str = submatches.value_of("to").unwrap();
+            let receiver: (NibbleKey, Vec<u8>) = db.query_row(
+                "SELECT key, value FROM leaves WHERE key = ?1;",
+                hex::decode(receiver_addr),
+                extract_key,
+            )?;
+            if !trie.has_key(&receiver.0) {
+                panic!(format!("Could not find receiver address {:?}", receiver));
+            }
+            let mut raccount: Account = rlp::decode(&receiver.1).unwrap();
+
+            // Build the proof of the current state
+            let proof = make_multiproof(&trie, vec![sender.0.clone(), receiver.0.clone()]).unwrap();
             // Serialize the updated sender account
-            let next_saccount = match saccount {
+            let updated_saccount = match saccount {
                 Account::Existing(_, _, ref mut balance, _, _) => {
                     // Check that the sender's value is lower than the sending account's
                     // balance.
@@ -341,24 +355,12 @@ fn main() -> rusqlite::Result<()> {
                 )),
             };
 
-            // Extract recipient information
-            let receiver_addr: &str = submatches.value_of("to").unwrap();
-            let receiver: (NibbleKey, Vec<u8>) = db.query_row(
-                "SELECT key, value FROM leaves WHERE key = ?1;",
-                hex::decode(receiver_addr),
-                extract_key,
-            )?;
-            if !trie.has_key(&receiver.0) {
-                panic!(format!("Could not find receiver address {:?}", receiver));
-            }
-            let mut raccount: Account = rlp::decode(&receiver.1).unwrap();
-
             // Serialize the updated recipient account
-            let next_raccount = match raccount {
+            let updated_raccount = match raccount {
                 Account::Existing(_, _, ref mut balance, _, _) => {
 
                     *balance += tx_value;
-                    rlp::encode(&saccount)
+                    rlp::encode(&raccount)
                 }
                 Account::Empty => {
                     // Sending to a non-existing account, create it
@@ -372,11 +374,10 @@ fn main() -> rusqlite::Result<()> {
                 }
             };
 
-            // Update the trie, generate the proof and calculate the root and add
-            // it to the database.
-            trie.insert(&sender.0, next_saccount).unwrap();
-            trie.insert(&receiver.0, next_raccount).unwrap();
-            let proof = make_multiproof(&trie, vec![sender.0.clone(), receiver.0.clone()]).unwrap();
+            // Generate the base proof, update values, and calculate the root and
+            // add it to the database.
+            trie.insert(&sender.0, updated_saccount).unwrap();
+            trie.insert(&receiver.0, updated_raccount).unwrap();
             let final_hash = trie.hash();
 
             let layer2tx = Tx {
