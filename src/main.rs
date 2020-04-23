@@ -132,6 +132,30 @@ fn has_root(db: &Connection) -> bool {
     count > 0
 }
 
+fn update_leaf(db: &Connection, key: NibbleKey, value: Vec<u8>) -> rusqlite::Result<usize> {
+    db.execute(
+        format!(
+            "UPDATE leaves SET value = X'{}' WHERE key = X'{}';",
+            hex::encode(value),
+            hex::encode::<Vec<u8>>(ByteKey::from(key).into()),
+        )
+        .as_str(),
+        NO_PARAMS,
+    )
+}
+
+fn insert_leaf(db: &Connection, key: NibbleKey, value: Vec<u8>) -> rusqlite::Result<usize> {
+    db.execute(
+        format!(
+            "INSERT INTO leaves (key, value) VALUES (X'{}', X'{}');",
+            hex::encode::<Vec<u8>>(ByteKey::from(key).into()),
+            hex::encode(value),
+        )
+        .as_str(),
+        NO_PARAMS,
+    )
+}
+
 fn extract_key(row: &Row) -> rusqlite::Result<(NibbleKey, Vec<u8>)> {
     let bkey = row.get::<_, Vec<u8>>(0)?;
     let k: NibbleKey = NibbleKey::from(ByteKey::from(bkey));
@@ -334,6 +358,7 @@ fn main() -> rusqlite::Result<()> {
 
             // Build the proof of the current state
             let proof = make_multiproof(&trie, vec![sender.0.clone(), receiver.0.clone()]).unwrap();
+
             // Serialize the updated sender account
             let updated_saccount = match saccount {
                 Account::Existing(_, _, ref mut balance, _, _) => {
@@ -372,8 +397,7 @@ fn main() -> rusqlite::Result<()> {
                 }
             };
 
-            // Generate the base proof, update values, and calculate the root and
-            // add it to the database.
+            // Update values, and calculate the root
             trie.insert(&sender.0, updated_saccount).unwrap();
             trie.insert(&receiver.0, updated_raccount).unwrap();
             let final_hash = trie.hash();
@@ -490,35 +514,10 @@ fn main() -> rusqlite::Result<()> {
                 trie.insert(&tx.to, rlp::encode(&racc)).unwrap();
 
                 if !is_create {
-                    db.execute(
-                        format!(
-                            "UPDATE leaves SET value = X'{}' WHERE key = X'{}';",
-                            hex::encode(rlp::encode(&racc)),
-                            hex::encode::<Vec<u8>>(ByteKey::from(tx.to.clone()).into()),
-                        )
-                        .as_str(),
-                        NO_PARAMS,
-                    )?;
-
-                    db.execute(
-                        format!(
-                            "UPDATE leaves SET value = X'{}' WHERE key = X'{}';",
-                            hex::encode(rlp::encode(&sacc)),
-                            hex::encode::<Vec<u8>>(ByteKey::from(tx.from.clone()).into()),
-                        )
-                        .as_str(),
-                        NO_PARAMS,
-                    )?;
+                    update_leaf(&db, tx.to.clone(), rlp::encode(&racc))?;
+                    update_leaf(&db, tx.from.clone(), rlp::encode(&sacc))?;
                 } else {
-                    db.execute(
-                        format!(
-                            "INSERT INTO leaves (key, value) VALUES (X'{}', X'{}');",
-                            hex::encode::<Vec<u8>>(ByteKey::from(tx.to.clone()).into()),
-                            hex::encode(rlp::encode(&racc)),
-                        )
-                        .as_str(),
-                        NO_PARAMS,
-                    )?;
+                    insert_leaf(&db, tx.to.clone(), rlp::encode(&racc))?;
                 }
 
                 // Update the root at each successful tx, because it might
