@@ -242,10 +242,10 @@ fn main() -> rusqlite::Result<()> {
     let dbfilename = matches.value_of("db").unwrap_or("leaves.db");
 
     let db = initdb(dbfilename)?;
+    let mut trie = rebuild_trie(&db).unwrap();
 
     match matches.subcommand() {
         ("join", Some(submatches)) => {
-            let mut trie = rebuild_trie(&db).unwrap();
             let tx_value = submatches
                 .value_of("value")
                 .unwrap()
@@ -307,8 +307,6 @@ fn main() -> rusqlite::Result<()> {
                 .unwrap_or("0")
                 .parse::<u64>()
                 .unwrap();
-
-            let mut trie = rebuild_trie(&db).unwrap();
 
             // Extract sender information
             let sender_addr: &str = submatches.value_of("from").unwrap();
@@ -392,7 +390,10 @@ fn main() -> rusqlite::Result<()> {
                 txs: vec![layer2tx],
                 signature: vec![],
             };
+
+            // Do NOT update the db: this transaction might not be accepted
             println!("Proof: {:?}\nHash: {:?}", txdata, final_hash);
+            println!("Encoded data: {}", hex::encode(rlp::encode(&txdata)));
 
             db.execute(
                 format!(
@@ -409,11 +410,12 @@ fn main() -> rusqlite::Result<()> {
         ("apply", Some(submatches)) => {
             let txdata: TxData =
                 rlp::decode(&hex::decode(submatches.value_of("data").unwrap()).unwrap()).unwrap();
-            let mut trie: Node = txdata.proof.rebuild().unwrap();
+            let prooftrie: Node = txdata.proof.rebuild().unwrap();
             let root = get_root(&db);
-            if root != trie.hash() {
+            if root != prooftrie.hash() {
                 panic!("Invalid root hash {:?} != {:?}", trie.hash(), root);
             }
+            assert_eq!(trie.hash(), prooftrie.hash());
 
             // Ideally, this code should recover the sender's address
             // from the tx's signature. This will not be handled at this
