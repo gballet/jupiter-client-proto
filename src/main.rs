@@ -199,6 +199,22 @@ fn rebuild_trie(db: &Connection) -> rusqlite::Result<Node> {
     Ok(root)
 }
 
+fn get_account(db: &Connection, addr: &str) -> rusqlite::Result<Account> {
+    if !has_root(db) {
+        panic!("db has no root");
+    }
+
+    let val = db
+        .query_row(
+            format!("SELECT value FROM leaves WHERE key = X'{}'", addr).as_str(),
+            NO_PARAMS,
+            |row| row.get::<_, Vec<u8>>(0),
+        )
+        .unwrap_or(Vec::<u8>::new());
+
+    Ok(rlp::decode(&val).unwrap())
+}
+
 fn main() -> rusqlite::Result<()> {
     let matches = App::new("jupiter-client")
         .version(env!("CARGO_PKG_VERSION"))
@@ -279,6 +295,17 @@ fn main() -> rusqlite::Result<()> {
                         .takes_value(true)
                         .required(true)
                         .help("address of the sender"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("accdmp")
+                .about("dump the content of an account")
+                .arg(
+                    Arg::with_name("addr")
+                        .short("a")
+                        .takes_value(true)
+                        .required(true)
+                        .help("address of the account"),
                 ),
         )
         .get_matches();
@@ -548,6 +575,11 @@ fn main() -> rusqlite::Result<()> {
                 let val = rlp::encode(&tx);
                 log_tx(&db, "apply", tx.from, tx.to, val)?;
             }
+        }
+        ("accdmp", Some(submatches)) => {
+            let addr = submatches.value_of("addr").unwrap();
+            let account = get_account(&db, addr).unwrap();
+            println!("Account: {:?}", account);
         }
         _ => panic!("Not implemented yet"),
     }
