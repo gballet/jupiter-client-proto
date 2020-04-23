@@ -116,6 +116,7 @@ fn get_root(db: &Connection) -> Vec<u8> {
 }
 
 fn update_root(db: &Connection, hash: Vec<u8>) -> rusqlite::Result<()> {
+    println!("Setting trie root to {:?}", hex::encode(hash.clone()));
     db.execute(
         format!("UPDATE root SET hash = X'{}'", hex::encode(hash)).as_str(),
         NO_PARAMS,
@@ -150,6 +151,26 @@ fn insert_leaf(db: &Connection, key: NibbleKey, value: Vec<u8>) -> rusqlite::Res
             "INSERT INTO leaves (key, value) VALUES (X'{}', X'{}');",
             hex::encode::<Vec<u8>>(ByteKey::from(key).into()),
             hex::encode(value),
+        )
+        .as_str(),
+        NO_PARAMS,
+    )
+}
+
+fn log_tx(
+    db: &Connection,
+    operation: &str,
+    from: NibbleKey,
+    to: NibbleKey,
+    val: Vec<u8>,
+) -> rusqlite::Result<usize> {
+    db.execute(
+        format!(
+            "INSERT INTO logs (type, sender, recipient, data) VALUES ('{}', '{}', '{}', X'{}');",
+            operation,
+            hex::encode::<Vec<u8>>(ByteKey::from(from).into()),
+            hex::encode::<Vec<u8>>(ByteKey::from(to).into()),
+            hex::encode(val)
         )
         .as_str(),
         NO_PARAMS,
@@ -524,17 +545,8 @@ fn main() -> rusqlite::Result<()> {
                 // then fail. TODO make all these updates as a (db) transaction
                 update_root(&db, trie.hash())?;
 
-                db.execute(
-                format!(
-                    "INSERT INTO logs (type, sender, recipient, data) VALUES ('{}', '{}', '{}', X'{}');",
-                    "apply",
-                    hex::encode::<Vec<u8>>(ByteKey::from(tx.from.clone()).into()),
-                    hex::encode::<Vec<u8>>(ByteKey::from(tx.to.clone()).into()),
-                    hex::encode(rlp::encode(&tx))
-                )
-                .as_str(),
-                NO_PARAMS,
-            )?;
+                let val = rlp::encode(&tx);
+                log_tx(&db, "apply", tx.from, tx.to, val)?;
             }
         }
         _ => panic!("Not implemented yet"),
