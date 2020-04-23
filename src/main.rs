@@ -468,7 +468,18 @@ fn main() -> rusqlite::Result<()> {
 
                 let racc = if trie.has_key(&tx.to) {
                     match &trie[&tx.to] {
-                        Node::Leaf(_, v) => rlp::decode(&v).unwrap(),
+                        Node::Leaf(_, v) => {
+                            let mut acc: Account = rlp::decode(&v).unwrap();
+                            match acc {
+                                Account::Existing(_, _, ref mut balance, _, _) => {
+                                    *balance += tx.value
+                                }
+                                _ => panic!(
+                                    "proof is considering an existing account as non-existent"
+                                ),
+                            }
+                            acc
+                        }
                         _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.to)),
                     }
                 } else {
