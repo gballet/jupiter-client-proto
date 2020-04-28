@@ -1,11 +1,11 @@
-extern crate account;
 extern crate clap;
+extern crate jupiter_account;
 extern crate multiproof_rs;
 extern crate rlp;
 extern crate rusqlite;
 
-use account::Account;
 use clap::{App, Arg, SubCommand};
+use jupiter_account::Account;
 use multiproof_rs::{make_multiproof, ByteKey, Multiproof, NibbleKey, Node, ProofToTree, Tree};
 use rusqlite::{Connection, Row, NO_PARAMS};
 
