@@ -416,7 +416,6 @@ fn main() -> rusqlite::Result<()> {
                         panic!(format!("Account {:?} only has a balance of {}, which is lower than the requested {}", sender.0, balance, tx_value))
                     }
 
-
                     *balance -= tx_value;
                     rlp::encode(&saccount)
                 }
@@ -429,7 +428,6 @@ fn main() -> rusqlite::Result<()> {
             // Serialize the updated recipient account
             let updated_raccount = match raccount {
                 Account::Existing(_, _, ref mut balance, _, _) => {
-
                     *balance += tx_value;
                     rlp::encode(&raccount)
                 }
