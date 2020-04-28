@@ -1,3 +1,5 @@
+[![CircleCI](https://circleci.com/gh/gballet/jupiter-relayer-proto.svg?style=svg)](https://circleci.com/gh/gballet/jupiter-relayer-proto)
+
 # Jupiter relayer tool prototype
 
 This tool has two functions:
