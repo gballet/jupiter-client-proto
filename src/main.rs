@@ -210,7 +210,7 @@ fn get_account(db: &Connection, addr: &str) -> rusqlite::Result<Account> {
             NO_PARAMS,
             |row| row.get::<_, Vec<u8>>(0),
         )
-        .unwrap_or(Vec::<u8>::new());
+        .unwrap_or_default();
 
     Ok(rlp::decode(&val).unwrap())
 }
@@ -346,7 +346,7 @@ fn main() -> rusqlite::Result<()> {
                     hex::decode("0000000000000000000000000000000000000000000000000000000000000000")
                         .unwrap(),
                 )),
-                to: sender_addr.clone(),
+                to: sender_addr,
                 call: 0,
                 nonce: 0,
             };
