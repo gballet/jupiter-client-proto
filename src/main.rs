@@ -215,6 +215,69 @@ fn get_account(db: &Connection, addr: &str) -> rusqlite::Result<Account> {
     Ok(rlp::decode(&val).unwrap())
 }
 
+fn apply_tx(tx: &Tx, trie: &mut Node, sender: &NibbleKey) -> (bool, Vec<u8>, Vec<u8>) {
+    let is_create = NibbleKey::from(ByteKey::from(
+        hex::decode("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+    )) == tx.from;
+
+    // Note that anyone can create an account for someone else
+    let sacc = if is_create {
+        if trie.has_key(&tx.from) {
+            panic!(format!(
+                "Trying to create an account that is already present at address {:?}",
+                tx.from
+            ));
+        }
+
+        Account::Existing(tx.from.clone(), 0, tx.value, vec![], false)
+    } else {
+        if tx.from != *sender {
+            panic!(format!(
+                "Invalid transaction: from={:?} != sender={:?}",
+                tx.from, sender
+            ));
+        }
+
+        if !trie.has_key(&tx.from) {
+            panic!(format!("Account isn't present in trie: {:?}", tx.from));
+        }
+
+        let sleaf = match &trie[&tx.from] {
+            Node::Leaf(_, v) => v,
+            _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.from)),
+        };
+        let sacc = match rlp::decode::<Account>(&sleaf).unwrap() {
+            Account::Existing(addr, n, val, code, state) => {
+                Account::Existing(addr, n, val - tx.value, code, state)
+            }
+            _ => panic!("Sender account is an empty account!"),
+        };
+
+        trie.insert(&tx.from, rlp::encode(&sacc)).unwrap();
+
+        sacc
+    };
+
+    let racc = if trie.has_key(&tx.to) {
+        match &trie[&tx.to] {
+            Node::Leaf(_, v) => {
+                let mut acc: Account = rlp::decode(&v).unwrap();
+                match acc {
+                    Account::Existing(_, _, ref mut balance, _, _) => *balance += tx.value,
+                    _ => panic!("proof is considering an existing account as non-existent"),
+                }
+                acc
+            }
+            _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.to)),
+        }
+    } else {
+        Account::Existing(tx.to.clone(), 0, tx.value, vec![], false)
+    };
+    trie.insert(&tx.to, rlp::encode(&racc)).unwrap();
+
+    (is_create, rlp::encode(&sacc), rlp::encode(&racc))
+}
+
 fn main() -> rusqlite::Result<()> {
     let matches = App::new("jupiter-client")
         .version(env!("CARGO_PKG_VERSION"))
@@ -495,75 +558,13 @@ fn main() -> rusqlite::Result<()> {
             ));
 
             for tx in txdata.txs {
-                let is_create = NibbleKey::from(ByteKey::from(
-                    hex::decode("0000000000000000000000000000000000000000000000000000000000000000")
-                        .unwrap(),
-                )) == tx.from;
-
-                // Note that anyone can create an account for someone else
-                let sacc = if is_create {
-                    if trie.has_key(&tx.from) {
-                        panic!(format!(
-                            "Trying to create an account that is already present at address {:?}",
-                            tx.from
-                        ));
-                    }
-
-                    Account::Existing(tx.from.clone(), 0, tx.value, vec![], false)
-                } else {
-                    if tx.from != sender {
-                        panic!(format!(
-                            "Invalid transaction: from={:?} != sender={:?}",
-                            tx.from, sender
-                        ));
-                    }
-
-                    if !trie.has_key(&tx.from) {
-                        panic!(format!("Account isn't present in trie: {:?}", tx.from));
-                    }
-
-                    let sleaf = match &trie[&tx.from] {
-                        Node::Leaf(_, v) => v,
-                        _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.from)),
-                    };
-                    let sacc = match rlp::decode::<Account>(&sleaf).unwrap() {
-                        Account::Existing(addr, n, val, code, state) => {
-                            Account::Existing(addr, n, val - tx.value, code, state)
-                        }
-                        _ => panic!("Sender account is an empty account!"),
-                    };
-
-                    trie.insert(&tx.from, rlp::encode(&sacc)).unwrap();
-
-                    sacc
-                };
-
-                let racc = if trie.has_key(&tx.to) {
-                    match &trie[&tx.to] {
-                        Node::Leaf(_, v) => {
-                            let mut acc: Account = rlp::decode(&v).unwrap();
-                            match acc {
-                                Account::Existing(_, _, ref mut balance, _, _) => {
-                                    *balance += tx.value
-                                }
-                                _ => panic!(
-                                    "proof is considering an existing account as non-existent"
-                                ),
-                            }
-                            acc
-                        }
-                        _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.to)),
-                    }
-                } else {
-                    Account::Existing(tx.to.clone(), 0, tx.value, vec![], false)
-                };
-                trie.insert(&tx.to, rlp::encode(&racc)).unwrap();
+                let (is_create, sacc, racc) = apply_tx(&tx, &mut trie, &sender);
 
                 if !is_create {
-                    update_leaf(&db, tx.to.clone(), rlp::encode(&racc))?;
-                    update_leaf(&db, tx.from.clone(), rlp::encode(&sacc))?;
+                    update_leaf(&db, tx.to.clone(), racc)?;
+                    update_leaf(&db, tx.from.clone(), sacc)?;
                 } else {
-                    insert_leaf(&db, tx.to.clone(), rlp::encode(&racc))?;
+                    insert_leaf(&db, tx.to.clone(), racc)?;
                 }
 
                 // Update the root at each successful tx, because it might
