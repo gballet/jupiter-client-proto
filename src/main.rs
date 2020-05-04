@@ -371,6 +371,18 @@ fn main() -> rusqlite::Result<()> {
                         .help("address of the account"),
                 ),
         )
+        .subcommand(
+            SubCommand::with_name("merge")
+                .about("merge two transactions in one")
+                .arg(
+                    Arg::with_name("data")
+                        .short("d")
+                        .takes_value(true)
+                        .multiple(true)
+                        .required(true)
+                        .help("txdata to merge"),
+                ),
+        )
         .get_matches();
 
     // Start with initializing the leaf DB
@@ -579,6 +591,47 @@ fn main() -> rusqlite::Result<()> {
             let addr = submatches.value_of("addr").unwrap();
             let account = get_account(&db, addr).unwrap();
             println!("Account: {:?}", account);
+        }
+        ("merge", Some(submatches)) => {
+            if let Some(txdata_list) = submatches.values_of("data") {
+                let mut all_txs = vec![];
+                let original_trie = trie.clone();
+                let mut senders = vec![];
+                for txdata_hex in txdata_list {
+                    let txdata: TxData = rlp::decode(&hex::decode(txdata_hex).unwrap()).unwrap();
+                    let prooftrie: Node = txdata.proof.rebuild().unwrap();
+                    let root = get_root(&db);
+                    if prooftrie.hash() != root {
+                        panic!("invalid root in data");
+                    }
+
+                    for tx in txdata.txs {
+                        // Check the tx can be applied
+                        // NOTE at the moment the sender is not checked,
+                        // and this check will be removed in the furture
+                        // because there is a need to get it from the tx
+                        // signature
+                        apply_tx(&tx, &mut trie, &tx.from);
+
+                        senders.push(tx.from.clone());
+                        all_txs.push(tx);
+                    }
+                }
+
+                let proof = make_multiproof(&original_trie, senders).unwrap();
+
+                let txdata = TxData {
+                    proof,
+                    txs: all_txs,
+                    signature: vec![],
+                };
+
+                println!("New root: {:?}", trie.hash());
+                println!("Transaction data: {:?}", txdata);
+                println!("Encoded data: {}", hex::encode(rlp::encode(&txdata)));
+            } else {
+                panic!("no tx data provided")
+            }
         }
         _ => panic!("Not implemented yet"),
     }
