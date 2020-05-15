@@ -9,7 +9,6 @@ use jupiter_account::{Account, Tx, TxData};
 use multiproof_rs::{make_multiproof, ByteKey, NibbleKey, Node, ProofToTree, Tree};
 use rusqlite::{Connection, Row, NO_PARAMS};
 
-
 fn initdb(dbfilename: &str) -> rusqlite::Result<Connection> {
     let conn = Connection::open(dbfilename)?;
 
