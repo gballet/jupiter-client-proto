@@ -39,4 +39,4 @@ $ cargo run apply -d f846f5c0e08fce208ccb84000000018082038480008fce208ccb8400000
  - [ ] Nonce and signatures
  - [ ] Support for contracts
  - [ ] Support for merging several txs together `merge`
- - [ ] fix sqlite3 issue in build
+ - [X] fix sqlite3 issue in build
