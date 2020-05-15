@@ -194,6 +194,11 @@ fn apply_tx(tx: &Tx, trie: &mut Node, sender: &NibbleKey) -> (bool, Vec<u8>, Vec
         sacc
     };
 
+    // Check nonce
+    if tx.nonce != sacc.nonce() {
+        panic!("Invalid nonce");
+    }
+
     let racc = if trie.has_key(&tx.to) {
         match &trie[&tx.to] {
             Node::Leaf(_, v) => {
@@ -359,7 +364,7 @@ fn main() -> rusqlite::Result<()> {
                 )),
                 to: sender_addr,
                 call: 0,
-                nonce: 0,
+                nonce: account.nonce(),
             };
             let txdata = TxData {
                 proof,
@@ -420,12 +425,14 @@ fn main() -> rusqlite::Result<()> {
 
             // Serialize the updated sender account
             let updated_saccount = match saccount {
-                Account::Existing(_, _, ref mut balance, _, _) => {
+                Account::Existing(_, ref mut nonce, ref mut balance, _, _) => {
                     // Check that the sender's value is lower than the sending account's
                     // balance.
                     if (*balance as u64) < tx_value {
                         panic!(format!("Account {:?} only has a balance of {}, which is lower than the requested {}", sender.0, balance, tx_value))
                     }
+
+                    *nonce += 1;
 
                     *balance -= tx_value;
                     rlp::encode(&saccount)
@@ -464,7 +471,7 @@ fn main() -> rusqlite::Result<()> {
                 from: sender.0,
                 to: receiver.0,
                 call: 0,
-                nonce: 0, // XXX saccount.nonce
+                nonce: saccount.nonce(),
             };
             let txdata = TxData {
                 proof,
