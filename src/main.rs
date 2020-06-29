@@ -1,13 +1,19 @@
 extern crate clap;
 extern crate jupiter_account;
 extern crate multiproof_rs;
+extern crate rand;
 extern crate rlp;
 extern crate rusqlite;
+extern crate secp256k1;
+extern crate sha3;
 
 use clap::{App, Arg, SubCommand};
 use jupiter_account::{Account, Tx, TxData};
 use multiproof_rs::{make_multiproof, ByteKey, NibbleKey, Node, ProofToTree, Tree};
+use rand::{thread_rng, Rng};
 use rusqlite::{Connection, Row, NO_PARAMS};
+use secp256k1::{recover as secp256k1_recover, sign as secp256k1_sign, Message, SecretKey};
+use sha3::{Digest, Keccak256};
 
 fn initdb(dbfilename: &str) -> rusqlite::Result<Connection> {
     let conn = Connection::open(dbfilename)?;
@@ -225,6 +231,9 @@ fn main() -> rusqlite::Result<()> {
         .author(env!("CARGO_PKG_AUTHORS"))
         .about(env!("CARGO_PKG_DESCRIPTION"))
         .arg(Arg::with_name("db").help("path to the database file"))
+        .subcommand(
+            SubCommand::with_name("keygen").about("generate a new account with its private key"),
+        )
         .subcommand(
             SubCommand::with_name("join")
                 .about("creates an unsigned tx to send value")
@@ -575,6 +584,21 @@ fn main() -> rusqlite::Result<()> {
             } else {
                 panic!("no tx data provided")
             }
+        }
+        ("keygen", _) => {
+            let mut rng = thread_rng();
+            let mut skdata = [0u8; 32];
+            rng.fill(&mut skdata);
+            let sk = SecretKey::parse(&skdata).unwrap();
+            let msg = Message::parse_slice(&[0x55u8; 32]).unwrap();
+            let (sig, recid) = secp256k1_sign(&msg, &sk);
+            let pk = secp256k1_recover(&msg, &sig, &recid).unwrap();
+            let mut keccak256 = Keccak256::new();
+            keccak256.input(&pk.serialize()[..]);
+            let addr = keccak256.result_reset()[..20].to_vec();
+
+            println!("addr={:?}", hex::encode(addr));
+            println!("privkey={:?}", hex::encode(sk.serialize()));
         }
         _ => panic!("Not implemented yet"),
     }
