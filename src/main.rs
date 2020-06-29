@@ -362,7 +362,7 @@ fn main() -> rusqlite::Result<()> {
             // Proof that the account isn't already in the trie.
             let proof = make_multiproof(&trie, vec![sender_addr.clone()]).unwrap();
 
-            let account = Account::Existing(sender_addr.clone(), 0, tx_value, vec![], false);
+            let account = Account::Existing(sender_addr.clone(), 0, tx_value, vec![], vec![]);
             trie.insert(&sender_addr, rlp::encode(&account)).unwrap();
 
             let layer2tx = Tx {
@@ -371,14 +371,15 @@ fn main() -> rusqlite::Result<()> {
                     hex::decode("0000000000000000000000000000000000000000000000000000000000000000")
                         .unwrap(),
                 )),
+                data: vec![],
                 to: sender_addr,
                 call: 0,
                 nonce: account.nonce(),
+                signature: vec![0u8; 65],
             };
             let txdata = TxData {
                 proof,
                 txs: vec![layer2tx],
-                signature: vec![],
             };
 
             println!("New root: {:?}", trie.hash());
@@ -465,7 +466,7 @@ fn main() -> rusqlite::Result<()> {
                         0,
                         tx_value,
                         vec![],
-                        true,
+                        vec![],
                     ))
                 }
             };
@@ -481,11 +482,12 @@ fn main() -> rusqlite::Result<()> {
                 to: receiver.0,
                 call: 0,
                 nonce: saccount.nonce(),
+                signature: vec![0u8; 65],
+                data: vec![],
             };
             let txdata = TxData {
                 proof,
                 txs: vec![layer2tx],
-                signature: vec![],
             };
 
             // Do NOT update the db: this transaction might not be accepted
