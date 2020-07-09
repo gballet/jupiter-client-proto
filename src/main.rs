@@ -15,7 +15,28 @@ use rusqlite::{Connection, Row, NO_PARAMS};
 use secp256k1::{recover as secp256k1_recover, sign as secp256k1_sign, Message, SecretKey};
 use sha3::{Digest, Keccak256};
 
-fn initdb(dbfilename: &str) -> rusqlite::Result<Connection> {
+#[derive(Debug)]
+struct JupiterError(String);
+
+impl std::fmt::Display for JupiterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<rusqlite::Error> for JupiterError {
+    fn from(re: rusqlite::Error) -> Self {
+        JupiterError(format!("{}", re))
+    }
+}
+
+impl From<&str> for JupiterError {
+    fn from(s: &str) -> Self {
+        JupiterError(format!("{}", s))
+    }
+}
+
+fn initdb(dbfilename: &str) -> Result<Connection, JupiterError> {
     let conn = Connection::open(dbfilename)?;
 
     conn.execute(
