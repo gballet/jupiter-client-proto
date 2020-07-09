@@ -178,75 +178,7 @@ fn get_account(db: &Connection, addr: &str) -> rusqlite::Result<Account> {
     Ok(rlp::decode(&val).unwrap())
 }
 
-fn apply_tx(tx: &Tx, trie: &mut Node, sender: &NibbleKey) -> (bool, Vec<u8>, Vec<u8>) {
-    let is_create = NibbleKey::from(ByteKey::from(
-        hex::decode("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
-    )) == tx.from;
-
-    // Note that anyone can create an account for someone else
-    let sacc = if is_create {
-        if trie.has_key(&tx.from) {
-            panic!(format!(
-                "Trying to create an account that is already present at address {:?}",
-                tx.from
-            ));
-        }
-
-        Account::Existing(tx.from.clone(), 0, tx.value, vec![], false)
-    } else {
-        if tx.from != *sender {
-            panic!(format!(
-                "Invalid transaction: from={:?} != sender={:?}",
-                tx.from, sender
-            ));
-        }
-
-        if !trie.has_key(&tx.from) {
-            panic!(format!("Account isn't present in trie: {:?}", tx.from));
-        }
-
-        let sleaf = match &trie[&tx.from] {
-            Node::Leaf(_, v) => v,
-            _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.from)),
-        };
-        let sacc = match rlp::decode::<Account>(&sleaf).unwrap() {
-            Account::Existing(addr, n, val, code, state) => {
-                Account::Existing(addr, n, val - tx.value, code, state)
-            }
-            _ => panic!("Sender account is an empty account!"),
-        };
-
-        trie.insert(&tx.from, rlp::encode(&sacc)).unwrap();
-
-        sacc
-    };
-
-    // Check nonce
-    if tx.nonce != sacc.nonce() {
-        panic!("Invalid nonce");
-    }
-
-    let racc = if trie.has_key(&tx.to) {
-        match &trie[&tx.to] {
-            Node::Leaf(_, v) => {
-                let mut acc: Account = rlp::decode(&v).unwrap();
-                match acc {
-                    Account::Existing(_, _, ref mut balance, _, _) => *balance += tx.value,
-                    _ => panic!("proof is considering an existing account as non-existent"),
-                }
-                acc
-            }
-            _ => panic!(format!("Address {:?} doesn't point to a leaf", tx.to)),
-        }
-    } else {
-        Account::Existing(tx.to.clone(), 0, tx.value, vec![], false)
-    };
-    trie.insert(&tx.to, rlp::encode(&racc)).unwrap();
-
-    (is_create, rlp::encode(&sacc), rlp::encode(&racc))
-}
-
-fn main() -> rusqlite::Result<()> {
+fn main() -> Result<(), JupiterError> {
     let matches = App::new("jupiter-client")
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
@@ -528,39 +460,17 @@ fn main() -> rusqlite::Result<()> {
             )?;
         }
         ("apply", Some(submatches)) => {
-            let txdata: TxData =
-                rlp::decode(&hex::decode(submatches.value_of("data").unwrap()).unwrap()).unwrap();
-            let prooftrie: Node = txdata.proof.rebuild().unwrap();
+            let input_data = hex::decode(submatches.value_of("data").unwrap()).unwrap();
+            jupiter_contract::eth::set_calldata(input_data);
+
             let root = get_root(&db);
-            if root != prooftrie.hash() {
-                panic!("Invalid root hash {:?} != {:?}", trie.hash(), root);
-            }
-            assert_eq!(trie.hash(), prooftrie.hash());
+            jupiter_contract::eth::set_storage_root(root);
 
-            // Ideally, this code should recover the sender's address
-            // from the tx's signature. This will not be handled at this
-            // time so the command line value is currently trusted.
-            let sender = NibbleKey::from(ByteKey::from(
-                hex::decode(submatches.value_of("sender").unwrap()).unwrap(),
-            ));
+            jupiter_contract::contract_main()?;
 
-            for tx in txdata.txs {
-                let (is_create, sacc, racc) = apply_tx(&tx, &mut trie, &sender);
-
-                if !is_create {
-                    update_leaf(&db, tx.to.clone(), racc)?;
-                    update_leaf(&db, tx.from.clone(), sacc)?;
-                } else {
-                    insert_leaf(&db, tx.to.clone(), racc)?;
-                }
-
-                // Update the root at each successful tx, because it might
-                // then fail. TODO make all these updates as a (db) transaction
-                update_root(&db, trie.hash())?;
-
-                let val = rlp::encode(&tx);
-                log_tx(&db, "apply", tx.from, tx.to, val)?;
-            }
+            let mut newroot = vec![0u8; 32];
+            jupiter_contract::eth::get_storage_root(&mut newroot);
+            update_root(&db, newroot)?;
         }
         ("accdmp", Some(submatches)) => {
             let addr = submatches.value_of("addr").unwrap();
