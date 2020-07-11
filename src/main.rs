@@ -342,7 +342,7 @@ fn main() -> Result<(), JupiterError> {
             if let Some(txdata_list) = submatches.values_of("data") {
                 let mut all_txs = vec![];
                 let original_trie = trie.clone();
-                let mut senders = vec![];
+                let mut addrs = vec![];
                 for txdata_hex in txdata_list {
                     let txdata: TxData = rlp::decode(&hex::decode(txdata_hex).unwrap()).unwrap();
                     let prooftrie: Node = txdata.proof.rebuild().unwrap();
@@ -352,24 +352,18 @@ fn main() -> Result<(), JupiterError> {
                     }
 
                     for tx in txdata.txs {
-                        // Check the tx can be applied
-                        // NOTE at the moment the sender is not checked,
-                        // and this check will be removed in the furture
-                        // because there is a need to get it from the tx
-                        // signature
-                        apply_tx(&tx, &mut trie, &tx.from);
+                        addrs.push(tx.from.clone());
+                        addrs.push(tx.to.clone());
 
-                        senders.push(tx.from.clone());
                         all_txs.push(tx);
                     }
                 }
 
-                let proof = make_multiproof(&original_trie, senders).unwrap();
+                let proof = make_multiproof(&original_trie, addrs).unwrap();
 
                 let txdata = TxData {
                     proof,
                     txs: all_txs,
-                    signature: vec![],
                 };
 
                 println!("New root: {:?}", trie.hash());
