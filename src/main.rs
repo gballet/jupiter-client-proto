@@ -50,13 +50,13 @@ fn main() -> Result<(), JupiterError> {
         )
         .subcommand(
             SubCommand::with_name("join")
-                .about("creates an unsigned tx to send value")
+                .about("creates an signed tx to fund the layer 2 account")
                 .arg(
-                    Arg::with_name("addr")
-                        .short("a")
+                    Arg::with_name("skey")
+                        .short("s")
                         .takes_value(true)
                         .required(true)
-                        .help("the account to create"),
+                        .help("the private key of the account to create"),
                 )
                 .arg(
                     Arg::with_name("value")
@@ -164,53 +164,60 @@ fn main() -> Result<(), JupiterError> {
                 .unwrap();
 
             // TODO DRY
-            let a = hex::decode(submatches.value_of("addr").unwrap()).unwrap();
-            let sender_addr = NibbleKey::from(ByteKey::from(a));
-            if trie.has_key(&sender_addr) {
-                panic!(format!(
-                    "Can not create address {:?} as it already exists",
-                    sender_addr
-                ));
-            }
+            let keydata = hex::decode(submatches.value_of("skey").unwrap()).unwrap();
+            let skey = SecretKey::parse_slice(&keydata[..]).unwrap();
+            let mut sender = Account::from(&skey);
+            if let Account::Existing(ref addr, _, ref mut balance, _, _) = sender {
+                if trie.has_key(&addr) {
+                    panic!(format!(
+                        "Can not create address {:?} as it already exists",
+                        addr
+                    ));
+                }
+                *balance = tx_value;
 
-            // Proof that the account isn't already in the trie.
-            let proof = make_multiproof(&trie, vec![sender_addr.clone()]).unwrap();
+                // Proof that the account isn't already in the trie.
+                let proof = make_multiproof(&trie, vec![addr.clone()]).unwrap();
 
-            let account = Account::Existing(sender_addr.clone(), 0, tx_value, vec![], vec![]);
-            trie.insert(&sender_addr, rlp::encode(&account)).unwrap();
+                trie.insert(&addr, rlp::encode(&sender)).unwrap();
 
-            let layer2tx = Tx {
-                value: tx_value,
-                from: NibbleKey::from(ByteKey::from(
-                    hex::decode("0000000000000000000000000000000000000000000000000000000000000000")
+                let layer2tx = Tx {
+                    value: tx_value,
+                    from: NibbleKey::from(ByteKey::from(
+                        hex::decode(
+                            "0000000000000000000000000000000000000000000000000000000000000000",
+                        )
                         .unwrap(),
-                )),
-                data: vec![],
-                to: sender_addr,
-                call: 0,
-                nonce: account.nonce(),
-                signature: vec![0u8; 65],
-            };
-            let txdata = TxData {
-                proof,
-                txs: vec![layer2tx],
-            };
+                    )),
+                    data: vec![],
+                    to: addr.clone(),
+                    call: 0,
+                    nonce: 0,
+                    signature: vec![0u8; 65],
+                };
+                let txdata = TxData {
+                    proof,
+                    txs: vec![layer2tx],
+                };
 
-            println!("New root: {:?}", trie.hash());
-            println!("Transaction data: {:?}", txdata);
-            println!("Encoded data: {}", hex::encode(rlp::encode(&txdata)));
+                println!("New root: {:?}", trie.hash());
+                println!("Transaction data: {:?}", txdata);
+                println!("Encoded data: {}", hex::encode(rlp::encode(&txdata)));
 
-            db.execute(
+                db.execute(
                 format!(
                     "INSERT INTO logs (type, sender, recipient, data) VALUES ('{}', '{}', '{}', X'{}');",
                     "join",
                     "0000000000000000000000000000000000000000000000000000000000000000",
-                    submatches.value_of("addr").unwrap(),
+                    hex::encode::<Vec<u8>>(ByteKey::from(addr.clone()).into()),
                     hex::encode(rlp::encode(&txdata))
                 )
                 .as_str(),
                 NO_PARAMS,
             )?;
+            } else {
+                panic!("Could not create account")
+            }
         }
         ("sendtx", Some(submatches)) => {
             // Extract tx information
