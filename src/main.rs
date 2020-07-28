@@ -181,7 +181,7 @@ fn main() -> Result<(), JupiterError> {
 
                 trie.insert(&addr, rlp::encode(&sender)).unwrap();
 
-                let layer2tx = Tx {
+                let mut layer2tx = Tx {
                     value: tx_value,
                     from: NibbleKey::from(ByteKey::from(
                         hex::decode(
@@ -195,6 +195,9 @@ fn main() -> Result<(), JupiterError> {
                     nonce: 0,
                     signature: vec![0u8; 65],
                 };
+                let mut key = [0u8; 32];
+                key.copy_from_slice(&keydata[..32]);
+                layer2tx.sign(&key);
                 let txdata = TxData {
                     proof,
                     txs: vec![layer2tx],
