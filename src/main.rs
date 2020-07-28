@@ -12,7 +12,7 @@ mod db;
 use clap::{App, Arg, SubCommand};
 use db::*;
 use jupiter_account::{Account, Tx, TxData};
-use multiproof_rs::{make_multiproof, ByteKey, NibbleKey, Node, ProofToTree, Tree};
+use multiproof_rs::{make_multiproof, ByteKey, Hashable, NibbleKey, Node, ProofToTree, Tree};
 use rand::{thread_rng, Rng};
 use rusqlite::NO_PARAMS;
 use secp256k1::{recover as secp256k1_recover, sign as secp256k1_sign, Message, SecretKey};

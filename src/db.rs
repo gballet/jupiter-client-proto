@@ -1,6 +1,6 @@
 use super::JupiterError;
 use jupiter_account::Account;
-use multiproof_rs::{ByteKey, NibbleKey, Node, Tree};
+use multiproof_rs::{ByteKey, Hashable, NibbleKey, Node, Tree};
 use rusqlite::{Connection, Row, NO_PARAMS};
 
 pub(super) fn initdb(dbfilename: &str) -> Result<Connection, JupiterError> {
