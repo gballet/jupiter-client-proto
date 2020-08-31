@@ -35,7 +35,7 @@ impl From<rusqlite::Error> for JupiterError {
 
 impl From<&str> for JupiterError {
     fn from(s: &str) -> Self {
-        JupiterError(format!("{}", s))
+        JupiterError(s.to_string())
     }
 }
 

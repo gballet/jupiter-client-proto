@@ -63,6 +63,7 @@ pub(super) fn has_root(db: &Connection) -> bool {
     count > 0
 }
 
+#[allow(dead_code)]
 pub(super) fn update_leaf(
     db: &Connection,
     key: NibbleKey,
@@ -79,6 +80,7 @@ pub(super) fn update_leaf(
     )
 }
 
+#[allow(dead_code)]
 pub(super) fn insert_leaf(
     db: &Connection,
     key: NibbleKey,
@@ -95,6 +97,7 @@ pub(super) fn insert_leaf(
     )
 }
 
+#[allow(dead_code)]
 pub(super) fn log_tx(
     db: &Connection,
     operation: &str,
